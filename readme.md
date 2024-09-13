@@ -1,6 +1,6 @@
 # Nuclear Nest
 
-Nuclear Nest 是一个用 Go 编写的工具库，提供了一系列用于管理数据路径、版本信息、日志记录和命令行参数解析的功能。该库旨在为跨平台应用程序提供一致的开发体验。
+Nuclear Nest 是一个用 Go 编写的工具库，提供了一系列用于管理数据路径、版本信息、日志记录、命令行参数解析和 API 处理的功能。该库旨在为跨平台应用程序提供一致的开发体验。
 
 ![kbn](./kbn.png)
 
@@ -10,6 +10,8 @@ Nuclear Nest 是一个用 Go 编写的工具库，提供了一系列用于管理
 - **版本信息管理**：支持版本信息的设置和获取，并提供生成 MD5 校验文件和变更日志文件的功能。
 - **日志记录**：基于 `zap` 和 `lumberjack` 实现的高效日志记录系统，支持日志文件的自动分割和管理。
 - **命令行参数解析**：提供通用的命令行参数解析功能，支持打印版本信息、生成 MD5 校验文件和变更日志文件。
+- **API 处理**：提供标准化的 API 响应结构和错误处理机制。
+- **认证工具**：支持模块间的内部认证，基于 RSA 和 AES 加密。
 
 ## 安装
 
@@ -84,6 +86,55 @@ import "github.com/atmshang/nuclear-nest/pkg/flagutil"
 func main() {
     flagutil.ParseFlags()
     // 其他初始化代码
+}
+```
+
+### API 处理
+
+使用标准化的 API 响应结构和错误处理：
+
+```go
+import (
+    "github.com/atmshang/nuclear-nest/pkg/apiutil"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    r := gin.Default()
+    apiutil.UseErrorHandler(r)
+    r.GET("/example", func(c *gin.Context) {
+        c.JSON(200, apiutil.Response{
+            Code:    2000,
+            Message: "Success",
+            Data:    "Example data",
+        })
+    })
+    r.Run()
+}
+```
+
+### 认证工具
+
+设置公钥和私钥进行模块间认证：
+
+```go
+import "github.com/atmshang/nuclear-nest/pkg/authutil"
+
+func main() {
+    err := authutil.SetPublicKey("your-public-key-pem")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    err = authutil.SetPrivateKey("your-private-key-pem")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 使用认证中间件
+    r := gin.Default()
+    r.Use(authutil.InternalServiceAuth())
+    r.Run()
 }
 ```
 

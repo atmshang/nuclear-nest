@@ -83,6 +83,11 @@ func Printf(format string, args ...interface{}) {
 	lastLogTime = time.Now()
 }
 
+func Errorf(format string, args ...interface{}) {
+	logger.Info(fmt.Sprintf(format, args...))
+	lastLogTime = time.Now()
+}
+
 func Print(args ...interface{}) {
 	logger.Info(fmt.Sprint(args...))
 	lastLogTime = time.Now()
