@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	HeaderInternalServiceAuth = "X-LincService-Auth"
-	HeaderVerifiedByTraefik   = "X-Verified-By-Traefik"
+	headerInternalServiceAuth = "X-LincService-Auth"
+	headerVerifiedByTraefik   = "X-Verified-By-Traefik"
 	validateTime              = time.Second * time.Duration(10) // 十秒内有效
 )
 
@@ -32,7 +32,18 @@ var (
 var (
 	publicKey  *rsa.PublicKey
 	privateKey *rsa.PrivateKey
+	debugMode  = true
 )
+
+/*****************************************************************
+*							调试模式
+*****************************************************************/
+
+// SetDebugMode 设置调试模式
+func SetDebugMode(debug bool) {
+	debugMode = debug
+	logutil.Println("调试模式：", debugMode)
+}
 
 /*****************************************************************
 *							密钥设置
@@ -76,18 +87,16 @@ func SetPrivateKey(pemStr string) error {
 }
 
 /*****************************************************************
-*							中间件部分
+*							可信访问
 *****************************************************************/
 
 type AuthHeader struct {
-	Service    string `json:"service"`    // 服务名称，不区分大小写
-	Expiration int64  `json:"expiration"` // 过期时间，UTC时间戳
+	Expiration int64 `json:"expiration"` // 过期时间，UTC时间戳
 }
 
-// GenerateAuthHeaderValue 生成InternalServiceAuth的值
-func GenerateAuthHeaderValue(service string) string {
+// GenerateAuthHeaderValue 生成可信访问的请求头参数
+func GenerateAuthHeaderValue() (string, string) {
 	header := AuthHeader{
-		Service:    service,
 		Expiration: time.Now().Add(validateTime).UnixMilli(),
 	}
 	jsonBytes, err := json.Marshal(header)
@@ -100,7 +109,7 @@ func GenerateAuthHeaderValue(service string) string {
 		panic(err)
 	}
 
-	return base64.StdEncoding.EncodeToString(bytes)
+	return headerInternalServiceAuth, base64.StdEncoding.EncodeToString(bytes)
 }
 
 func parseAuthHeaderValue(headerStr string) (AuthHeader, error) {
@@ -119,83 +128,89 @@ func parseAuthHeaderValue(headerStr string) (AuthHeader, error) {
 	if err != nil {
 		return auth, err
 	}
-	if len(auth.Service) == 0 {
-		return auth, invalidAuthHeader
-	}
 	return auth, nil
 }
 
 type verify struct {
-	UserId    uint      `json:"userId"`
+	UserId    string    `json:"userId"`
 	IsAdmin   bool      `json:"isAdmin"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
 func verifiedByTraefik(ctx *gin.Context) bool {
-	verifiedStr := ctx.GetHeader(HeaderVerifiedByTraefik)
+	verifiedStr := ctx.GetHeader(headerInternalServiceAuth)
 	if len(verifiedStr) == 0 {
-		logutil.Errorf("[verifiedByTraefik] %s is empty", HeaderVerifiedByTraefik)
+		logutil.Println("[verifiedByTraefik] 来自网关的请求头不存在")
 		return false
 	}
 	var encryptedModel EncryptedData
 	err := json.Unmarshal([]byte(verifiedStr), &encryptedModel)
 	if err != nil {
-		logutil.Errorf("[verifiedByTraefik] invalid header from traefik: %s", verifiedStr)
+		logutil.Println("[verifiedByTraefik] 加密的请求头反序列化失败")
 		return false
 	}
-	bytes, err := decryptAESString(encryptedModel)
+	bytes, err := DecryptAESString(encryptedModel)
 	if err != nil {
-		logutil.Errorf("[verifiedByTraefik] decryptRSA error: %v", err)
+		logutil.Println("[verifiedByTraefik] 加密的请求头解密失败")
 		return false
 	}
 	var verifyModel verify
 	err = json.Unmarshal([]byte(bytes), &verifyModel)
 	if err != nil {
-		logutil.Errorf("[verifiedByTraefik] json unmarshal error: %v", err)
-		return false
-	}
-	if verifyModel.UserId == 0 {
-		logutil.Errorf("[verifiedByTraefik] after unmarshalling, userId = 0")
+		logutil.Println("[verifiedByTraefik] 解密的鉴权内容反序列化失败")
 		return false
 	}
 	return true
 }
 
-// InternalServiceAuth 内部服务间调用的认证中间件,若是经过traefik验证，则直接放行
+// InternalServiceAuth 内部服务间调用的认证中间件,若是经过traefik验证,则直接放行
 func InternalServiceAuth() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
+
+		if debugMode {
+			logutil.Println("[InternalServiceAuth] 调试模式放行")
+		}
+
 		if verifiedByTraefik(ctx) {
-			// 若已通过traefik验证，则直接通过
 			ctx.Next()
 			return
 		}
-		// get
-		var header string
-		header = ctx.GetHeader(HeaderInternalServiceAuth)
-		if len(header) == 0 {
-			header = ctx.Query(HeaderInternalServiceAuth)
-		}
 
-		if len(header) == 0 {
-			_ = ctx.AbortWithError(http.StatusUnauthorized, emptyAuthHeader)
+		if verifyByAuthHeader(ctx) {
+			ctx.Next()
 			return
 		}
 
-		// check invalid
-		authHeader, err := parseAuthHeaderValue(header)
-		if err != nil {
-			logutil.Errorf("[InternalServiceAuth] parseAuthHeader error: %v", err)
-			_ = ctx.AbortWithError(http.StatusUnauthorized, err)
-			return
-		}
-
-		if time.Now().After(time.UnixMilli(authHeader.Expiration)) {
-			_ = ctx.AbortWithError(http.StatusUnauthorized, expiredAuthHeader)
-			return
-		}
-		// let it go
-		ctx.Next()
+		ctx.AbortWithStatus(http.StatusUnauthorized)
+		return
 	}
+}
+
+func verifyByAuthHeader(ctx *gin.Context) bool {
+	var header string
+	header = ctx.GetHeader(headerVerifiedByTraefik)
+	if len(header) == 0 {
+		header = ctx.Query(headerVerifiedByTraefik)
+	}
+	if len(header) == 0 {
+		_ = ctx.AbortWithError(http.StatusUnauthorized, emptyAuthHeader)
+		logutil.Println("可信请求的字段不存在")
+		return false
+	}
+
+	authHeader, err := parseAuthHeaderValue(header)
+	if err != nil {
+		_ = ctx.AbortWithError(http.StatusUnauthorized, invalidAuthHeader)
+		logutil.Println("可信请求的解析失败")
+		return false
+	}
+
+	if time.Now().After(time.UnixMilli(authHeader.Expiration)) {
+		_ = ctx.AbortWithError(http.StatusUnauthorized, expiredAuthHeader)
+		logutil.Println("可信请求已过期")
+		return false
+	}
+	return true
 }
 
 /*****************************************************************
@@ -228,7 +243,7 @@ const (
 	aesKeyLength = 32
 )
 
-func encryptAESString(input string) (EncryptedData, error) {
+func EncryptAESString(input string) (EncryptedData, error) {
 	// Generate a random AES key
 	aesKey := make([]byte, aesKeyLength)
 	_, err := rand.Read(aesKey)
@@ -256,7 +271,7 @@ func encryptAESString(input string) (EncryptedData, error) {
 	return encrypted, nil
 }
 
-func decryptAESString(encryptedData EncryptedData) (string, error) {
+func DecryptAESString(encryptedData EncryptedData) (string, error) {
 	// Decode the base64-encoded data
 	decodedEncryptedData, err := base64.StdEncoding.DecodeString(encryptedData.Data)
 	if err != nil {
