@@ -169,6 +169,8 @@ func InternalServiceAuth() gin.HandlerFunc {
 
 		if debugMode {
 			logutil.Println("[InternalServiceAuth] 调试模式放行")
+			ctx.Next()
+			return
 		}
 
 		if verifiedByTraefik(ctx) {
