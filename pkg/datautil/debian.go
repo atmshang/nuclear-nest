@@ -1,5 +1,5 @@
-//go:build linos_l
-// +build linos_l
+//go:build lincos_d
+// +build lincos_d
 
 package datautil
 
