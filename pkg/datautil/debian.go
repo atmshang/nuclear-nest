@@ -1,5 +1,5 @@
-//go:build linux
-// +build linux
+//go:build linos_l
+// +build linos_l
 
 package datautil
 

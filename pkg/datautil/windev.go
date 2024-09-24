@@ -1,5 +1,5 @@
-//go:build windows
-// +build windows
+//go:build lincos_w
+// +build lincos_w
 
 package datautil
 

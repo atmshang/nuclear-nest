@@ -1,5 +1,5 @@
-//go:build android
-// +build android
+//go:build linos_a
+// +build linos_a
 
 package datautil
 
