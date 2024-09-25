@@ -21,7 +21,7 @@ var (
 	lastLogTime time.Time
 )
 
-func init() {
+func InitLogger() {
 	once.Do(func() {
 		dataPath := datautil.GetRelDataPath()
 
